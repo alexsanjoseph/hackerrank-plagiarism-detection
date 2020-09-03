@@ -41,7 +41,7 @@ def get_all_submission_links(config):
 def get_score(driver):
     all_text = driver.find_elements_by_class_name("submission-stats2-content")
     score_text = "\n".join([x.text for x in all_text])
-    score_match = re.search("Score: ([\d\.]*)\\n", score_text)
+    score_match = re.search(r"Score: ([\d\.]*)\\n", score_text)
     return None if score_match is None else float(score_match.group(1))
 
 
