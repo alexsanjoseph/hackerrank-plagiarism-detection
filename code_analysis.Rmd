@@ -1,0 +1,140 @@
+---
+title: "SRM 2020 code analysis"
+output:
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: console
+---
+
+# Connect to Database and Getting data.
+
+```{r}
+library(tidyverse)
+
+conn <- RSQLite::dbConnect(RSQLite::SQLite(), yaml::read_yaml("config.yml")[[links_db_path]])
+submissions_data = RSQLite::dbReadTable(conn, 'submissions') %>%
+  filter(challenge != "Accident Detection") %>%
+  filter(username != '[deleted]')
+RSQLite::dbDisconnect(conn)
+```
+
+# Finding Distance Metrics
+
+```{r}
+
+all_challenges = unique(submissions_data$challenge)
+
+all_challenge_matrices = lapply(all_challenges, function(current_challenge){
+  print(current_challenge)
+  submissions_data_single_challenge = submissions_data %>%
+    filter(challenge == current_challenge) %>%
+    arrange(code)
+  round(stringdist::stringdistmatrix(
+    submissions_data_single_challenge$code,
+    submissions_data_single_challenge$code,
+    method = 'jw'
+  ), 3)
+})
+
+all_challenge_scores = lapply(1:length(all_challenges), function(i){
+  # data.frame(apply(total_dist < 0.1, 1, sum) > 1)
+  submissions_data_single_challenge = submissions_data %>%
+    filter(challenge == all_challenges[i]) %>%
+    arrange(code) %>%
+    select(username)
+  single_matrix = all_challenge_matrices[[i]]
+  output = data.frame(submissions_data_single_challenge, score = apply(t(single_matrix), 1, sort)[2,])
+  names(output)[2] = all_challenges[i]
+  output
+})
+
+similarity_df = Reduce(function(x,y) merge(x, y, by = 'username', all = TRUE), all_challenge_scores) %>%
+  setNames(c("username", all_challenges))
+
+similarity_df_cleaned = similarity_df %>%
+  filter(username != '[deleted]')
+similarity_df_cleaned[is.na(similarity_df_cleaned)] = 1
+similarity_df_cleaned %>% head()
+```
+
+# Penalizing Plentiful hack
+
+```{r}
+plentiful_hack_df = submissions_data %>%
+  filter(str_detect(challenge, "Plentiful")) %>%
+  mutate(plentiful_hacked = str_detect(code, '495012538604')) %>%
+  select(username, plentiful_hacked)
+
+```
+
+# Final score!
+
+```{r}
+total_score = submissions_data %>%
+  group_by(username) %>%
+  summarize(total_score = sum(score))
+
+report_final = merge(similarity_df_cleaned, total_score, all = T) %>%
+  merge(plentiful_hack_df, all = T) %>%
+  mutate(plentiful_hacked = replace(plentiful_hacked, is.na(plentiful_hacked), FALSE)) %>%
+  mutate(plagiarism_1 = apply(.[,2:6] < .[,2:6] %>% apply(2, median)/5, 1, sum) > 1,
+         plagiarism_2 =  apply(.[,3:6] <= 0.01, 1, sum) > 0)
+
+report_final %>% head(20)
+```
+
+# Pretty graphs!
+
+```{r}
+
+adj_matrix = all_challenge_matrices %>% lapply(function(x) {
+  x <= 0.01
+})
+
+adj_matrix = adj_matrix[[4]]
+
+igraph::plot.igraph(A2, vertex.size = 2, vertex.label.cex = 0.5,
+                    edge.arrow.size = 0.5, edge.arrow.width = 0.5,
+                    vertex.label = NA,
+                    vertex.tootip = 1:1348,
+                    # lty=0,
+                    layout = igraph::layout_with_graphopt(A1),
+                    # vertex.color = V(A1)$community
+)
+
+# A1 = igraph::graph_from_adjacency_matrix(adj_matrix, diag = F)
+# # plot(A1, vertex.size = 5, igraph::layout_(A1, igraph::n()))
+# # plot(A1, vertex.size = 5, layout=igraph::layout_nicely(A1))
+# A2 = igraph::cluster_label_prop(A1)
+# V(A1)$community <- A2$membership
+# colrs <- adjustcolor( c("gray50", "tomato", "gold", "yellowgreen"), alpha=.6)
+# A2$membership = A2$membership[A2$membership %in% which(table(A2$membership) >=2)]
+# plot(A2, A1,vertex.size = 2,  vertex.label.cex = 0.5,vertex.label = NA)
+
+```
+
+# User specific testing
+```{r}
+
+current_user = 'sv4807'
+challenge_text = "Plentiful"
+# challenge_text = "RA1711003020369"
+current_challenge_df = submissions_data %>%
+  filter(str_detect(challenge, challenge_text))
+
+current_challenge_df = submissions_data %>%
+  filter(str_detect(challenge, challenge_text)) #%>%
+  # filter(str_detect(code, 'inp_list'))
+
+current_challenge_user = current_challenge_df %>%
+  filter(username == current_user)
+cat(current_challenge_user$code)
+
+output = stringdist::stringdistmatrix(
+  current_challenge_user$code,
+  current_challenge_df$code,
+  method = 'lv'
+)
+
+```
