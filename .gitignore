@@ -43,3 +43,4 @@ data/
 venv/
 .vscode/settings.json
 *.pyc
+*.Rproj

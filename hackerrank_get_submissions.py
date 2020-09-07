@@ -33,9 +33,9 @@ def current_link_list(submission_db):
 
 
 def get_all_submission_links(config):
-    with open(config['links_file_path'], "r") as f:
+    with open(config["links_file_path"], "r") as f:
         all_submissions = f.readlines()
-    return sorted(list(set(all_submissions) - set(['\n'])))
+    return sorted(list(set(all_submissions) - set(["\n"])))
 
 
 def get_score(driver):
@@ -53,19 +53,20 @@ def find_code_lines(driver):
 if __name__ == "__main__":
     config = get_config()
 
-    driver = webdriver.Chrome(config['chromedriver_path'])
+    driver = webdriver.Chrome(config["chromedriver_path"])
     driver.implicitly_wait(10)
     site_login(driver, config)
 
     all_submissions = get_all_submission_links(config)
 
-    submission_db = sqlite3.connect(config['links_db_path'])
+    submission_db = sqlite3.connect(config["links_db_path"])
     current_submissions = current_link_list(submission_db)
 
     submissions_to_query = list(set(all_submissions) - set(current_submissions))
-    for single_submission in submissions_to_query:
+    for i, single_submission in enumerate(submissions_to_query):
 
         try:
+            print(f"{str(i)}/{len(submissions_to_query)}")
             print(single_submission)
             # if 'accident' in single_submission:
             #     print('Ignoring Accident Detection!')
