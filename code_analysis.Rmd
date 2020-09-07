@@ -113,23 +113,6 @@ report_selected = report_final %>%
 library(igraph)
 library(visNetwork)
 
-# adj_matrix = all_challenge_matrices %>% lapply(function(x) {
-#   x <= 0.01
-# })
-# 
-# adj_matrix = adj_matrix[[4]]
-# 
-# igraph::plot.igraph(A2, vertex.size = 2, vertex.label.cex = 0.5,
-#                     edge.arrow.size = 0.5, edge.arrow.width = 0.5,
-#                     vertex.label = NA,
-#                     vertex.tootip = 1:1348,
-#                     # lty=0,
-#                     layout = igraph::layout_with_graphopt(A1),
-#                     # vertex.color = V(A1)$community
-# )
-# 
-# all_usernames = submissions_data$username %>% unique()
-
 all_graphs_distance = lapply(2:length(all_challenges), function(i){
   # data.frame(apply(total_dist < 0.1, 1, sum) > 1)
   submissions_data_single_challenge = submissions_data %>%
@@ -144,12 +127,15 @@ all_graphs_distance = lapply(2:length(all_challenges), function(i){
     merge(submissions_data_single_challenge, by.x = 'to', by.y = 'n') 
   # browser()
   # names(output)[2] = all_challenges[i]
-  output %>% select(starts_with('username'))
+  output %>% select(starts_with('username')) %>% 
+    mutate(challenge = all_challenges[i])
 }) %>% bind_rows()
 
+all_graphs_distance_2 = all_graphs_distance %>% group_by(username.x, username.y) %>% 
+  summarize(width = n(), title = paste0(challenge, collapse = ", "))
+other_usernames = user_details$username %>% Filter(function(x) !(x %in% all_graphs_distance_2$username.x), .)
+final_graph = igraph::graph_from_data_frame(all_graphs_distance_2) 
 
-other_usernames = user_details$username %>% Filter(function(x) !(x %in% all_graphs_distance$username.x), .)
-final_graph = igraph::graph_from_data_frame(all_graphs_distance) 
 final_graph = add_vertices(final_graph, length(other_usernames), name = other_usernames)
 
 user_details = submissions_data %>% 
@@ -165,36 +151,15 @@ user_details = user_details %>% merge(data.frame(
 current_graph_usernames = user_details[match(igraph::get.vertex.attribute(final_graph, 'name'), user_details$username),]
 final_graph = igraph::set_vertex_attr(final_graph, 'institute', value = current_graph_usernames$institute)
 final_graph = igraph::set_vertex_attr(final_graph, 'color', value = current_graph_usernames$color)
-# user_details[order(),]
 
-igraph::plot.igraph(final_graph, vertex.size = 2, vertex.label.cex = 0.5,
-                    edge.arrow.size = 0.5, edge.arrow.width = 0.5,
-                    vertex.label = NA,
-                    vertex.tootip = 1:1348,
-                    # lty=0,
-                    layout = igraph::layout_with_graphopt(final_graph),
-                    vertex.color = V(final_graph)$color
-                    # vertex.label = V(final_graph)$name
-)
+
 V(final_graph)$title = V(final_graph)$name
-
-visIgraph(final_graph) %>% 
-  visEdges(color = "black") %>% 
+V(final_graph)$size = 10
+visIgraph(final_graph, physics = T, randomSeed = 42) %>% 
+  visEdges(color = "black", arrows = list(to = FALSE, from = FALSE, middle = FALSE)) %>% 
   visIgraphLayout("layout.graphopt") %>%
   visOptions(width = "1600", height = "1200")
 
-# igraph::layougrap
-# g <- make_ring(10, dir=TRUE)
-# al <- igraph::graph_from_data_frame(g, mode="out")
-
-# A1 = igraph::graph_from_adjacency_matrix(adj_matrix, diag = F)
-# # plot(A1, vertex.size = 5, igraph::layout_(A1, igraph::n()))
-# # plot(A1, vertex.size = 5, layout=igraph::layout_nicely(A1))
-# A2 = igraph::cluster_label_prop(A1)
-# V(A1)$community <- A2$membership
-# colrs <- adjustcolor( c("gray50", "tomato", "gold", "yellowgreen"), alpha=.6)
-# A2$membership = A2$membership[A2$membership %in% which(table(A2$membership) >=2)]
-# plot(A2, A1,vertex.size = 2,  vertex.label.cex = 0.5,vertex.label = NA)
 
 ```
 
@@ -227,5 +192,50 @@ mapping_df = read.csv(yaml::read_yaml("data/config.yaml")[['mapping_file']])
 mapping_df$Hackerank.ID
 
 
+```
+
+
+#Additional Testing
+```{r}
+
+# adj_matrix = all_challenge_matrices %>% lapply(function(x) {
+#   x <= 0.01
+# })
+# 
+# adj_matrix = adj_matrix[[4]]
+# 
+# igraph::plot.igraph(A2, vertex.size = 2, vertex.label.cex = 0.5,
+#                     edge.arrow.size = 0.5, edge.arrow.width = 0.5,
+#                     vertex.label = NA,
+#                     vertex.tootip = 1:1348,
+#                     # lty=0,
+#                     layout = igraph::layout_with_graphopt(A1),
+#                     # vertex.color = V(A1)$community
+# )
+# 
+# all_usernames = submissions_data$username %>% unique()
+# 
+# igraph::plot.igraph(final_graph, vertex.size = 2, vertex.label.cex = 0.5,
+#                     edge.arrow.size = 0.5, edge.arrow.width = 0.5,
+#                     vertex.label = NA,
+#                     vertex.tootip = 1:1348,
+#                     # lty=0,
+#                     layout = igraph::layout_with_graphopt(final_graph),
+#                     vertex.color = V(final_graph)$color
+#                     # vertex.label = V(final_graph)$name
+# )
+# ?visIgraph
+# igraph::layougrap
+# g <- make_ring(10, dir=TRUE)
+# al <- igraph::graph_from_data_frame(g, mode="out")
+
+# A1 = igraph::graph_from_adjacency_matrix(adj_matrix, diag = F)
+# # plot(A1, vertex.size = 5, igraph::layout_(A1, igraph::n()))
+# # plot(A1, vertex.size = 5, layout=igraph::layout_nicely(A1))
+# A2 = igraph::cluster_label_prop(A1)
+# V(A1)$community <- A2$membership
+# colrs <- adjustcolor( c("gray50", "tomato", "gold", "yellowgreen"), alpha=.6)
+# A2$membership = A2$membership[A2$membership %in% which(table(A2$membership) >=2)]
+# plot(A2, A1,vertex.size = 2,  vertex.label.cex = 0.5,vertex.label = NA)
 ```
 
