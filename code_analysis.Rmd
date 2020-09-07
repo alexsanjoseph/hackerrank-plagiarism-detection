@@ -12,11 +12,16 @@ editor_options:
 ```{r}
 library(tidyverse)
 
-conn <- RSQLite::dbConnect(RSQLite::SQLite(), yaml::read_yaml("config.yml")[[links_db_path]])
-submissions_data = RSQLite::dbReadTable(conn, 'submissions') %>%
+conn <- RSQLite::dbConnect(RSQLite::SQLite(), yaml::read_yaml("data/config.yaml")[['links_db_path']])
+submissions_data = RSQLite::dbReadTable(conn, 'submissions') 
+# accident_data = submissions_data %>% filter(challenge == "Accident Detection")
+submissions_data = submissions_data %>%
+  mutate(institute = "SRM") %>% 
+  mutate(institute = replace(institute, str_detect(link, 'sastra'), "SASTRA")) %>% 
   filter(challenge != "Accident Detection") %>%
   filter(username != '[deleted]')
 RSQLite::dbDisconnect(conn)
+
 ```
 
 # Finding Distance Metrics
@@ -30,11 +35,13 @@ all_challenge_matrices = lapply(all_challenges, function(current_challenge){
   submissions_data_single_challenge = submissions_data %>%
     filter(challenge == current_challenge) %>%
     arrange(code)
-  round(stringdist::stringdistmatrix(
-    submissions_data_single_challenge$code,
-    submissions_data_single_challenge$code,
-    method = 'jw'
-  ), 3)
+  round(
+    vimana::load_cache(
+      fx = stringdist::stringdistmatrix, cache_dir = "data/cache/",
+      a = submissions_data_single_challenge$code,
+      b = submissions_data_single_challenge$code,
+      method = 'jw'
+    ), 3)
 })
 
 all_challenge_scores = lapply(1:length(all_challenges), function(i){
@@ -44,7 +51,7 @@ all_challenge_scores = lapply(1:length(all_challenges), function(i){
     arrange(code) %>%
     select(username)
   single_matrix = all_challenge_matrices[[i]]
-  output = data.frame(submissions_data_single_challenge, score = apply(t(single_matrix), 1, sort)[2,])
+  output = data.frame(submissions_data_single_challenge, score = apply(t(single_matrix), 1, sort)[3,])
   names(output)[2] = all_challenges[i]
   output
 })
@@ -61,10 +68,22 @@ similarity_df_cleaned %>% head()
 # Penalizing Plentiful hack
 
 ```{r}
+hack_text = ">[=\\s]*\\d{5,}"
 plentiful_hack_df = submissions_data %>%
   filter(str_detect(challenge, "Plentiful")) %>%
-  mutate(plentiful_hacked = str_detect(code, '495012538604')) %>%
-  select(username, plentiful_hacked)
+  mutate(
+    # plentiful_hacked = str_detect(code, '495012538604'),
+    plentiful_hacked = str_detect(code, hack_text),
+    plentiful_extract = str_extract(code, hack_text)) %>%
+  select(username, starts_with("plentiful"))
+
+
+# plentiful_hack_df = submissions_data %>%
+#   filter(str_detect(challenge, "Plentiful")) %>%
+#   mutate(plentiful_hacked = str_detect(code, '\\d{5,}'),
+#          plentiful_extract = str_extract(code, '\\d{5,}')) %>%
+#   select(username, plentiful_hacked, plentiful_extract)
+
 
 ```
 
@@ -72,7 +91,7 @@ plentiful_hack_df = submissions_data %>%
 
 ```{r}
 total_score = submissions_data %>%
-  group_by(username) %>%
+  group_by(institute, username) %>%
   summarize(total_score = sum(score))
 
 report_final = merge(similarity_df_cleaned, total_score, all = T) %>%
@@ -82,26 +101,91 @@ report_final = merge(similarity_df_cleaned, total_score, all = T) %>%
          plagiarism_2 =  apply(.[,3:6] <= 0.01, 1, sum) > 0)
 
 report_final %>% head(20)
+
+report_selected = report_final %>% 
+  filter(!plagiarism_1 & !plagiarism_2 & !plentiful_hacked & total_score >= 0.7)
+
 ```
 
 # Pretty graphs!
 
 ```{r}
+library(igraph)
+library(visNetwork)
 
-adj_matrix = all_challenge_matrices %>% lapply(function(x) {
-  x <= 0.01
-})
+# adj_matrix = all_challenge_matrices %>% lapply(function(x) {
+#   x <= 0.01
+# })
+# 
+# adj_matrix = adj_matrix[[4]]
+# 
+# igraph::plot.igraph(A2, vertex.size = 2, vertex.label.cex = 0.5,
+#                     edge.arrow.size = 0.5, edge.arrow.width = 0.5,
+#                     vertex.label = NA,
+#                     vertex.tootip = 1:1348,
+#                     # lty=0,
+#                     layout = igraph::layout_with_graphopt(A1),
+#                     # vertex.color = V(A1)$community
+# )
+# 
+# all_usernames = submissions_data$username %>% unique()
 
-adj_matrix = adj_matrix[[4]]
+all_graphs_distance = lapply(2:length(all_challenges), function(i){
+  # data.frame(apply(total_dist < 0.1, 1, sum) > 1)
+  submissions_data_single_challenge = submissions_data %>%
+    filter(challenge == all_challenges[i]) %>%
+    arrange(code) %>%
+    # select(username) %>%
+    transmute(username, n = 1:n())
+  single_matrix = all_challenge_matrices[[i]] == 0
+  diag(single_matrix) = FALSE
+  adj_list = igraph::as_data_frame(igraph::graph_from_adjacency_matrix(single_matrix))
+  output = merge(submissions_data_single_challenge, adj_list, by.x = 'n', by.y = 'from') %>% 
+    merge(submissions_data_single_challenge, by.x = 'to', by.y = 'n') 
+  # browser()
+  # names(output)[2] = all_challenges[i]
+  output %>% select(starts_with('username'))
+}) %>% bind_rows()
 
-igraph::plot.igraph(A2, vertex.size = 2, vertex.label.cex = 0.5,
+
+other_usernames = user_details$username %>% Filter(function(x) !(x %in% all_graphs_distance$username.x), .)
+final_graph = igraph::graph_from_data_frame(all_graphs_distance) 
+final_graph = add_vertices(final_graph, length(other_usernames), name = other_usernames)
+
+user_details = submissions_data %>% 
+  select(username, institute) %>% 
+  unique() %>% 
+  filter(!duplicated(username))
+
+user_details = user_details %>% merge(data.frame(
+  institute = c("SRM", "SASTRA"),
+  color = c("#1B9E77", "#D95F02")
+))
+
+current_graph_usernames = user_details[match(igraph::get.vertex.attribute(final_graph, 'name'), user_details$username),]
+final_graph = igraph::set_vertex_attr(final_graph, 'institute', value = current_graph_usernames$institute)
+final_graph = igraph::set_vertex_attr(final_graph, 'color', value = current_graph_usernames$color)
+# user_details[order(),]
+
+igraph::plot.igraph(final_graph, vertex.size = 2, vertex.label.cex = 0.5,
                     edge.arrow.size = 0.5, edge.arrow.width = 0.5,
                     vertex.label = NA,
                     vertex.tootip = 1:1348,
                     # lty=0,
-                    layout = igraph::layout_with_graphopt(A1),
-                    # vertex.color = V(A1)$community
+                    layout = igraph::layout_with_graphopt(final_graph),
+                    vertex.color = V(final_graph)$color
+                    # vertex.label = V(final_graph)$name
 )
+V(final_graph)$title = V(final_graph)$name
+
+visIgraph(final_graph) %>% 
+  visEdges(color = "black") %>% 
+  visIgraphLayout("layout.graphopt") %>%
+  visOptions(width = "1600", height = "1200")
+
+# igraph::layougrap
+# g <- make_ring(10, dir=TRUE)
+# al <- igraph::graph_from_data_frame(g, mode="out")
 
 # A1 = igraph::graph_from_adjacency_matrix(adj_matrix, diag = F)
 # # plot(A1, vertex.size = 5, igraph::layout_(A1, igraph::n()))
@@ -117,15 +201,11 @@ igraph::plot.igraph(A2, vertex.size = 2, vertex.label.cex = 0.5,
 # User specific testing
 ```{r}
 
-current_user = 'sv4807'
+current_user = 'dd5174'
 challenge_text = "Plentiful"
 # challenge_text = "RA1711003020369"
 current_challenge_df = submissions_data %>%
   filter(str_detect(challenge, challenge_text))
-
-current_challenge_df = submissions_data %>%
-  filter(str_detect(challenge, challenge_text)) #%>%
-  # filter(str_detect(code, 'inp_list'))
 
 current_challenge_user = current_challenge_df %>%
   filter(username == current_user)
@@ -138,3 +218,14 @@ output = stringdist::stringdistmatrix(
 )
 
 ```
+
+Mapping to actual details
+```{r}
+
+
+mapping_df = read.csv(yaml::read_yaml("data/config.yaml")[['mapping_file']])
+mapping_df$Hackerank.ID
+
+
+```
+
