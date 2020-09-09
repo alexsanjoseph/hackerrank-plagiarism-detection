@@ -3,7 +3,7 @@ import re
 from selenium import webdriver
 from retry import retry
 from timeout_decorator import timeout, TimeoutError
-from hackerrank_get_links import site_login, get_config
+from hackerrank_get_links import site_login, get_config, get_all_submission_links
 
 
 @retry(TimeoutError, tries=3)
@@ -32,16 +32,12 @@ def current_link_list(submission_db):
     return [x[0] for x in current_submissions]
 
 
-def get_all_submission_links(config):
-    with open(config["links_file_path"], "r") as f:
-        all_submissions = f.readlines()
-    return sorted(list(set(all_submissions) - set(["\n"])))
-
-
 def get_score(driver):
     all_text = driver.find_elements_by_class_name("submission-stats2-content")
     score_text = "\n".join([x.text for x in all_text])
-    score_match = re.search(r"Score: ([\d\.]*)\\n", score_text)
+    score_match = re.search(r"Score: ([\d\.]*)\n", score_text)
+    if score_match is None:
+        print(score_text)
     return None if score_match is None else float(score_match.group(1))
 
 
@@ -63,6 +59,7 @@ if __name__ == "__main__":
     current_submissions = current_link_list(submission_db)
 
     submissions_to_query = list(set(all_submissions) - set(current_submissions))
+
     for i, single_submission in enumerate(submissions_to_query):
 
         try:
