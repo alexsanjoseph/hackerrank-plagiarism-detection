@@ -114,39 +114,36 @@ library(igraph)
 library(visNetwork)
 
 all_graphs_distance = lapply(2:length(all_challenges), function(i){
-  # data.frame(apply(total_dist < 0.1, 1, sum) > 1)
   submissions_data_single_challenge = submissions_data %>%
     filter(challenge == all_challenges[i]) %>%
     arrange(code) %>%
-    # select(username) %>%
     transmute(username, n = 1:n())
   single_matrix = all_challenge_matrices[[i]] == 0
   diag(single_matrix) = FALSE
   adj_list = igraph::as_data_frame(igraph::graph_from_adjacency_matrix(single_matrix))
   output = merge(submissions_data_single_challenge, adj_list, by.x = 'n', by.y = 'from') %>% 
     merge(submissions_data_single_challenge, by.x = 'to', by.y = 'n') 
-  # browser()
-  # names(output)[2] = all_challenges[i]
   output %>% select(starts_with('username')) %>% 
     mutate(challenge = all_challenges[i])
 }) %>% bind_rows()
 
 all_graphs_distance_2 = all_graphs_distance %>% group_by(username.x, username.y) %>% 
   summarize(width = n(), title = paste0(challenge, collapse = ", "))
+user_details = submissions_data %>% 
+  select(username, institute) %>% 
+  unique() %>% 
+  filter(!duplicated(username)) %>% 
+  merge(data.frame(
+    institute = c("SRM", "SASTRA"),
+    color = c("#1B9E77", "#D95F02")
+  ))
+
 other_usernames = user_details$username %>% Filter(function(x) !(x %in% all_graphs_distance_2$username.x), .)
 final_graph = igraph::graph_from_data_frame(all_graphs_distance_2) 
 
 final_graph = add_vertices(final_graph, length(other_usernames), name = other_usernames)
 
-user_details = submissions_data %>% 
-  select(username, institute) %>% 
-  unique() %>% 
-  filter(!duplicated(username))
 
-user_details = user_details %>% merge(data.frame(
-  institute = c("SRM", "SASTRA"),
-  color = c("#1B9E77", "#D95F02")
-))
 
 current_graph_usernames = user_details[match(igraph::get.vertex.attribute(final_graph, 'name'), user_details$username),]
 final_graph = igraph::set_vertex_attr(final_graph, 'institute', value = current_graph_usernames$institute)
