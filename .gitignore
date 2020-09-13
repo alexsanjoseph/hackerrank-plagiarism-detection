@@ -44,3 +44,5 @@ venv/
 .vscode/settings.json
 *.pyc
 *.Rproj
+/mapping.Rmd
+*.html

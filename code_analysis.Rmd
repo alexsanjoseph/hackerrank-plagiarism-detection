@@ -13,13 +13,15 @@ editor_options:
 library(tidyverse)
 
 conn <- RSQLite::dbConnect(RSQLite::SQLite(), yaml::read_yaml("data/config.yaml")[['links_db_path']])
-submissions_data = RSQLite::dbReadTable(conn, 'submissions') 
+submissions_data_all = RSQLite::dbReadTable(conn, 'submissions') 
 # accident_data = submissions_data %>% filter(challenge == "Accident Detection")
-submissions_data = submissions_data %>%
+submissions_data_all = submissions_data_all %>%
   mutate(institute = "SRM") %>% 
   mutate(institute = replace(institute, str_detect(link, 'sastra'), "SASTRA")) %>% 
-  filter(challenge != "Accident Detection") %>%
   filter(username != '[deleted]')
+
+submissions_data = submissions_data_all %>% 
+  filter(challenge != "Accident Detection")
 RSQLite::dbDisconnect(conn)
 
 ```
@@ -51,7 +53,7 @@ all_challenge_scores = lapply(1:length(all_challenges), function(i){
     arrange(code) %>%
     select(username)
   single_matrix = all_challenge_matrices[[i]]
-  output = data.frame(submissions_data_single_challenge, score = apply(t(single_matrix), 1, sort)[3,])
+  output = data.frame(submissions_data_single_challenge, score = apply(t(single_matrix), 1, sort)[2,])
   names(output)[2] = all_challenges[i]
   output
 })
@@ -59,8 +61,7 @@ all_challenge_scores = lapply(1:length(all_challenges), function(i){
 similarity_df = Reduce(function(x,y) merge(x, y, by = 'username', all = TRUE), all_challenge_scores) %>%
   setNames(c("username", all_challenges))
 
-similarity_df_cleaned = similarity_df %>%
-  filter(username != '[deleted]')
+similarity_df_cleaned = similarity_df
 similarity_df_cleaned[is.na(similarity_df_cleaned)] = 1
 similarity_df_cleaned %>% head()
 ```
@@ -90,20 +91,20 @@ plentiful_hack_df = submissions_data %>%
 # Final score!
 
 ```{r}
-total_score = submissions_data %>%
+total_score = submissions_data_all %>%
   group_by(institute, username) %>%
   summarize(total_score = sum(score))
 
 report_final = merge(similarity_df_cleaned, total_score, all = T) %>%
   merge(plentiful_hack_df, all = T) %>%
   mutate(plentiful_hacked = replace(plentiful_hacked, is.na(plentiful_hacked), FALSE)) %>%
-  mutate(plagiarism_1 = apply(.[,2:6] < .[,2:6] %>% apply(2, median)/5, 1, sum) > 1,
+  mutate(plagiarism_1 = apply(.[,2:6] < .[,2:6] %>% apply(2, median, na.rm = TRUE)/5, 1, sum) > 1,
          plagiarism_2 =  apply(.[,3:6] <= 0.01, 1, sum) > 0)
 
-report_final %>% head(20)
-
 report_selected = report_final %>% 
-  filter(!plagiarism_1 & !plagiarism_2 & !plentiful_hacked & total_score >= 0.7)
+  filter(!plagiarism_1 & !plagiarism_2 & !plentiful_hacked)
+
+write.csv(report_selected, yaml::read_yaml("data/config.yaml")[['selected_students_file']], row.names = F)
 
 ```
 
@@ -160,40 +161,9 @@ visIgraph(final_graph, physics = T, randomSeed = 42) %>%
 
 ```
 
-# User specific testing
-```{r}
 
-current_user = 'dd5174'
-challenge_text = "Plentiful"
-# challenge_text = "RA1711003020369"
-current_challenge_df = submissions_data %>%
-  filter(str_detect(challenge, challenge_text))
-
-current_challenge_user = current_challenge_df %>%
-  filter(username == current_user)
-cat(current_challenge_user$code)
-
-output = stringdist::stringdistmatrix(
-  current_challenge_user$code,
-  current_challenge_df$code,
-  method = 'lv'
-)
-
-```
-
-Mapping to actual details
-```{r}
-
-
-mapping_df = read.csv(yaml::read_yaml("data/config.yaml")[['mapping_file']])
-mapping_df$Hackerank.ID
-
-
-```
-
-
-#Additional Testing
-```{r}
+<!-- #Additional Testing -->
+```{r eval=FALSE, include=FALSE}
 
 # adj_matrix = all_challenge_matrices %>% lapply(function(x) {
 #   x <= 0.01
