@@ -1,0 +1,214 @@
+---
+title: "SRM 2020 code analysis"
+output:
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: console
+---
+
+# Connect to Database and Getting data.
+
+```{r}
+library(tidyverse)
+
+conn <- RSQLite::dbConnect(RSQLite::SQLite(), yaml::read_yaml("data/config.yaml")[['links_db_path']])
+submissions_data_all = RSQLite::dbReadTable(conn, 'submissions') 
+# accident_data = submissions_data %>% filter(challenge == "Accident Detection")
+submissions_data_all = submissions_data_all %>%
+  mutate(institute = "institute_1") %>% 
+  mutate(institute = replace(institute, str_detect(link, 'sastra'), "institute_2")) %>% 
+  filter(username != '[deleted]')
+
+submissions_data = submissions_data_all %>% 
+  filter(challenge != "Accident Detection") %>% 
+  mutate(username = substr(sapply(username, digest::digest), 1, 6)) %>% 
+  select(-link)
+RSQLite::dbDisconnect(conn)
+rm(submissions_data_all)
+# submissions_data %>% 
+#   mutate(code = paste0(substr(code, 1, 100), "...")) %>% 
+#   head(6) %>% 
+#   print(row.names= F)
+
+```
+
+# Finding Distance Metrics
+
+```{r}
+
+all_challenges = unique(submissions_data$challenge)
+
+all_challenge_matrices = lapply(all_challenges, function(current_challenge){
+  print(current_challenge)
+  submissions_data_single_challenge = submissions_data %>%
+    filter(challenge == current_challenge) %>%
+    arrange(code)
+  round(
+    vimana::load_cache(
+      fx = stringdist::stringdistmatrix, cache_dir = "data/cache/",
+      a = submissions_data_single_challenge$code,
+      b = submissions_data_single_challenge$code,
+      method = 'jw'
+    ), 3)
+})
+
+all_challenge_scores = lapply(1:length(all_challenges), function(i){
+  # data.frame(apply(total_dist < 0.1, 1, sum) > 1)
+  submissions_data_single_challenge = submissions_data %>%
+    filter(challenge == all_challenges[i]) %>%
+    arrange(code) %>%
+    select(username)
+  single_matrix = all_challenge_matrices[[i]]
+  output = data.frame(submissions_data_single_challenge, score = apply(t(single_matrix), 1, sort)[2,])
+  names(output)[2] = all_challenges[i]
+  output
+})
+
+similarity_df = Reduce(function(x,y) merge(x, y, by = 'username', all = TRUE), all_challenge_scores) %>%
+  setNames(c("username", all_challenges))
+
+similarity_df_cleaned = similarity_df
+similarity_df_cleaned[is.na(similarity_df_cleaned)] = 1
+similarity_df_cleaned %>% head()
+```
+
+# Penalizing Plentiful hack
+
+```{r}
+hack_text = ">[=\\s]*\\d{5,}"
+plentiful_hack_df = submissions_data %>%
+  filter(str_detect(challenge, "Plentiful")) %>%
+  mutate(
+    # plentiful_hacked = str_detect(code, '495012538604'),
+    plentiful_hacked = str_detect(code, hack_text),
+    plentiful_extract = str_extract(code, hack_text)) %>%
+  select(username, starts_with("plentiful"))
+
+
+# plentiful_hack_df = submissions_data %>%
+#   filter(str_detect(challenge, "Plentiful")) %>%
+#   mutate(plentiful_hacked = str_detect(code, '\\d{5,}'),
+#          plentiful_extract = str_extract(code, '\\d{5,}')) %>%
+#   select(username, plentiful_hacked, plentiful_extract)
+
+
+```
+
+# Final score!
+
+```{r}
+total_score = submissions_data %>%
+  group_by(institute, username) %>%
+  summarize(total_score = sum(score))
+
+find_elbow_point <- function(x){
+  log_scores = x %>% log() %>% Filter(Negate(is.infinite), .) %>% sort() %>% head(1000) 
+  output = akmedoids::elbowPoint(1:1000, log_scores)
+  print(
+    ggplot() + 
+      geom_point(aes(y = log_scores, x = 1:1000)) + 
+      geom_hline(yintercept = output$y, col = 'blue') +
+      geom_vline(xintercept = output$x, col = 'blue') +
+      ggtitle("Elbow point detection")
+  )
+  ggsave("elbow_point.png")
+    output$y %>% exp()
+}
+
+# similarity_df_cleaned[,5] %>% find_elbow_point()
+# similarity_df_cleaned[,2] %>% find_elbow_point()
+# # similarity_df_cleaned[,3] %>% find_elbow_point()
+# similarity_df_cleaned[,4] %>% find_elbow_point()
+
+report_final = merge(similarity_df_cleaned, total_score, all = T) %>%
+  merge(plentiful_hack_df, all = T) %>%
+  mutate(plentiful_hacked = replace(plentiful_hacked, is.na(plentiful_hacked), FALSE)) %>%
+  mutate(plagiarism_score = apply(.[,3:6] < .[,3:6] %>% apply(2, median, na.rm = TRUE)/10, 1, sum)) 
+  #group_by(plagiarism_score)
+
+report_final$plagiarism_score %>% table()
+
+ggplot(report_final) +
+  geom_bar(aes(x = plagiarism_score, fill=institute)) +
+  ggtitle("Total Challenges Identified as plagiarism across Institutes") +
+  ylab('Number of Students') +
+  xlab('Number of Challenges Identified as plagiarized') 
+ggsave("plagiarism_count.png")
+
+report_final_summary = report_final %>% 
+  group_by(institute, plagiarism_score) %>% 
+  summarise(total_group_score = n()) %>% 
+  group_by(institute) %>% 
+  mutate(total_students = sum(total_group_score)) %>% 
+  mutate(percentage = round(total_group_score/total_students, 3))
+  
+ggplot(report_final_summary) +
+  geom_bar(aes(x = plagiarism_score, y=percentage, fill=institute),
+           stat = 'identity', position = position_dodge(preserve = "single")) +
+  ggtitle("Percentage Identified as plagiarism across Institutes") +
+  ylab('Percentage of Students') +
+  xlab('Number of Challenges Identified as plagiarized') 
+ggsave("plagiarism_summary.png")
+ report_selected = report_final %>% 
+  filter(!plagiarism_1 & !plagiarism_2 & !plentiful_hacked)
+
+# write.csv(report_selected, yaml::read_yaml("data/config.yaml")[['selected_students_file']], row.names = F)
+
+```
+
+# Pretty graphs!
+
+```{r}
+library(igraph)
+library(visNetwork)
+
+all_graphs_distance = lapply(2:length(all_challenges), function(i){
+  submissions_data_single_challenge = submissions_data %>%
+    filter(challenge == all_challenges[i]) %>%
+    arrange(code) %>%
+    transmute(username, n = 1:n())
+  single_matrix = all_challenge_matrices[[i]] == 0
+  diag(single_matrix) = FALSE
+  adj_list = igraph::as_data_frame(igraph::graph_from_adjacency_matrix(single_matrix))
+  output = merge(submissions_data_single_challenge, adj_list, by.x = 'n', by.y = 'from') %>% 
+    merge(submissions_data_single_challenge, by.x = 'to', by.y = 'n') 
+  output %>% select(starts_with('username')) %>% 
+    mutate(challenge = all_challenges[i])
+}) %>% bind_rows()
+
+all_graphs_distance_2 = all_graphs_distance %>% group_by(username.x, username.y) %>% 
+  summarize(width = n(), title = paste0(challenge, collapse = ", "))
+
+user_details = submissions_data %>% 
+  select(username, institute) %>% 
+  unique() %>% 
+  filter(!duplicated(username)) %>% 
+  merge(data.frame(
+    # institute = c("SRM", "SASTRA"),
+    institute = c("institute_1", "institute_2"),
+    color = c("#1B9E77", "#D95F02")
+  ))
+
+other_usernames = user_details$username %>% Filter(function(x) !(x %in% all_graphs_distance_2$username.x), .)
+names(other_usernames) = NULL
+final_graph = igraph::graph_from_data_frame(all_graphs_distance_2) 
+
+final_graph = add_vertices(final_graph, length(other_usernames), name = other_usernames)
+
+
+
+current_graph_usernames = user_details[match(igraph::get.vertex.attribute(final_graph, 'name'), user_details$username),]
+final_graph = igraph::set_vertex_attr(final_graph, 'institute', value = current_graph_usernames$institute)
+final_graph = igraph::set_vertex_attr(final_graph, 'color', value = current_graph_usernames$color)
+
+
+V(final_graph)$title = V(final_graph)$name
+V(final_graph)$size = 10
+visIgraph(final_graph, physics = T, randomSeed = 42) %>% 
+  visEdges(color = "black", arrows = list(to = FALSE, from = FALSE, middle = FALSE)) %>% 
+  visIgraphLayout("layout.graphopt") %>%
+  visOptions(width = "1600", height = "1200")
+
+
+```
