@@ -144,11 +144,12 @@ report_final_summary = report_final %>%
   mutate(percentage = round(total_group_score/total_students, 3))
   
 ggplot(report_final_summary) +
-  geom_bar(aes(x = plagiarism_score, y=percentage, fill=institute),
+  geom_bar(aes(x = plagiarism_score, y = percentage, fill = institute),
            stat = 'identity', position = position_dodge(preserve = "single")) +
   ggtitle("Percentage Identified as plagiarism across Institutes") +
   ylab('Percentage of Students') +
-  xlab('Number of Challenges Identified as plagiarized') 
+  xlab('Number of Challenges Identified as plagiarized')
+
 ggsave("plagiarism_summary.png")
  report_selected = report_final %>% 
   filter(!plagiarism_1 & !plagiarism_2 & !plentiful_hacked)
