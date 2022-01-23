@@ -102,7 +102,7 @@ In this case, since the true output is not known, it is not easy to evaluate whe
 
 In this case we try to use the techniques we learned in the class to form a network of students who copied from each other. In the graph below (Fig 6), each node represents a student and an edge represents two students who have at least one submission that are very similar to each other. The color of the networks represent the institute of the students.
 
-![Plagrism Network - Full](images/graph_full.png
+![Plagrism Network - Full](images/graph_full.png)
 
 If the plagiarism detection was close to random, we'd have expected the total number of clusters to increase steadily, with some of the points being disconnected, many cliques with 2 nodes, fewer with 3, even fewer with 4, etc. Also, there shouldn't be any patterns across the two institutes. However, in the graph we can see a different scenario. The brute majority of points are disconnected showing that most people haven't copied from each other, as expected, but we're also seeing huge clusters where people nodes are closely connected to each other showing a good amount of organized plagiarism.
 
